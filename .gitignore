@@ -1,0 +1,35 @@
+# .gitignore for a full-stack project (Backend + Frontend)
+
+# General
+.DS_Store
+*.log
+npm-debug.log*
+
+# IDE & Editor specific files
+.vscode/
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.swp
+
+# Environment variables
+# NEVER commit .env files with secrets!
+.env
+.env.local
+.env.*.local
+!.env.example
+
+### Frontend (Vue/Vite) ###
+chatroom-frontend/node_modules/
+chatroom-frontend/dist/
+chatroom-frontend/.pnp.*
+chatroom-frontend/coverage/
+
+### Backend (Node.js) ###
+chatroom-backend/node_modules/
+chatroom-backend/dist/
+chatroom-backend/build/
+chatroom-backend/coverage/
+
