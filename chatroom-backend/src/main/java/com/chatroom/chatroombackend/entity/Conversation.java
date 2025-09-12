@@ -1,12 +1,14 @@
 package com.chatroom.chatroombackend.entity;
 
 import com.chatroom.chatroombackend.enums.ConversationType;
+import com.chatroom.chatroombackend.enums.ConversationTypeConverter;
 import jakarta.persistence.*;
 import lombok.Data;
 import org.hibernate.annotations.CreationTimestamp;
 import org.hibernate.annotations.UpdateTimestamp;
 import java.time.LocalDateTime;
 import java.util.Set;
+import java.util.UUID;
 
 @Data
 @Entity
@@ -17,8 +19,13 @@ public class Conversation {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
+    @Column(nullable = false, unique = true, updatable = false, length = 36)
+    private String uuid; // 新增的公开ID
+
     @Enumerated(EnumType.STRING)
-    @Column(columnDefinition = "ENUM('private', 'group')")
+//    @Column(columnDefinition = "ENUM('PRIVATE', 'GROUP')")
+    @Column(name = "type", nullable = false)
+//    @Convert(converter = ConversationTypeConverter.class)
     private ConversationType type;
 
     @Column(length = 100)
@@ -68,4 +75,12 @@ public class Conversation {
 
     @Column(name = "is_public")
     private boolean isPublic = true;
+
+    // 添加一个生命周期回调方法，在实体被持久化之前自动生成UUID
+    @PrePersist
+    public void prePersist() {
+        if (this.uuid == null) {
+            this.uuid = UUID.randomUUID().toString();
+        }
+    }
 }

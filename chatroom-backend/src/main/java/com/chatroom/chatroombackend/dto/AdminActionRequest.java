@@ -8,4 +8,5 @@ public class AdminActionRequest {
     private Long targetUserId;
     private LocalDateTime silenceUntil; // For silencing
     private String reason; // For blocking
+    private String action;
 }

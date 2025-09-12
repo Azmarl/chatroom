@@ -1,136 +1,191 @@
 package com.chatroom.chatroombackend.controller;
 
+import com.chatroom.chatroombackend.config.JwtTokenProvider;
+import com.chatroom.chatroombackend.dto.JwtAuthenticationResponse;
 import com.chatroom.chatroombackend.dto.LoginRequest;
 import com.chatroom.chatroombackend.dto.LoginResponse;
 import com.chatroom.chatroombackend.dto.RegisterRequest;
-import com.chatroom.chatroombackend.entity.RememberMeToken;
 import com.chatroom.chatroombackend.entity.User;
+import com.chatroom.chatroombackend.repository.UserRepository;
 import com.chatroom.chatroombackend.service.AuthService;
-import com.chatroom.chatroombackend.service.RememberMeTokenService;
-import org.springframework.beans.factory.annotation.Autowired;
+import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
+import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.ResponseCookie;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.authentication.AuthenticationManager;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.security.core.userdetails.UserDetails;
+import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.web.bind.annotation.*;
 
 import java.time.Duration;
+import java.util.Optional;
 
 @RestController
-@RequestMapping("/") // 映射到根目录
+@RequestMapping("/api/auth")
+@RequiredArgsConstructor
+@CrossOrigin(origins = "http://localhost:5173", allowCredentials = "true")
 public class AuthController {
 
     private final AuthService authService;
-    private final RememberMeTokenService tokenService;
+    private final AuthenticationManager authenticationManager;
+    private final JwtTokenProvider tokenProvider;
+    private final PasswordEncoder passwordEncoder;
+    private final UserRepository userRepository;
 
-    @Autowired
-    public AuthController(AuthService authService, RememberMeTokenService tokenService) {
-        this.authService = authService;
-        this.tokenService = tokenService;
+    /**
+     * (核心新增) 获取当前已认证用户的信息。
+     * 这个端点可以用来在应用启动时验证 accessToken 的有效性。
+     * @param userDetails 由Spring Security注入的当前用户信息
+     * @return 包含用户信息的ResponseEntity
+     */
+    @GetMapping("/me")
+    public ResponseEntity<?> getCurrentUser(@AuthenticationPrincipal UserDetails userDetails) {
+        if (userDetails == null) {
+            // 这通常不会发生，因为SecurityConfig会拦截未认证的请求
+            return ResponseEntity.status(401).body("Not authenticated");
+        }
+        User user = userRepository.findByUsername(userDetails.getUsername())
+                .orElseThrow(() -> new RuntimeException("Authenticated user not found"));
+
+        LoginResponse.UserInfo userInfo = new LoginResponse.UserInfo(
+                user.getId(), user.getUsername(), user.getNickname(), user.getAvatarUrl()
+        );
+
+        return ResponseEntity.ok(userInfo);
     }
 
     @PostMapping("/register")
     public ResponseEntity<?> createAccount(@RequestBody RegisterRequest registerRequest) {
         try {
+            if (userRepository.existsByUsername(registerRequest.getUsername())) {
+                return ResponseEntity.badRequest().body("用户名已被占用！");
+            }
+            if (userRepository.existsByEmail(registerRequest.getEmail())) {
+                return ResponseEntity.badRequest().body("邮箱已被占用！");
+            }
+
             User newUser = authService.createAccount(registerRequest);
-            // 注册成功，可以返回成功信息，或者直接返回用户信息（不含密码）
             return ResponseEntity.ok("账户创建成功！用户ID: " + newUser.getId());
         } catch (IllegalArgumentException | IllegalStateException e) {
-            // 处理业务逻辑异常（如用户已存在）
             return ResponseEntity.badRequest().body(e.getMessage());
         } catch (Exception e) {
-            // 处理其他未知异常
-            return ResponseEntity.internalServerError().body("服务器发生未知错误");
+            return ResponseEntity.internalServerError().body("服务器发生未知错误：" + e.getMessage());
         }
     }
 
     @PostMapping("/login")
-    public ResponseEntity<?> login(
-            @RequestBody(required = false) LoginRequest loginRequest,
-            @CookieValue(name = "remember-me", required = false) String rememberMeCookie
-    ) {
+    public ResponseEntity<?> login(@RequestBody LoginRequest loginRequest, HttpServletResponse response) {
         try {
-            User user;
-            String newTokenValue = null;
+            Authentication authentication = authenticationManager.authenticate(
+                    new UsernamePasswordAuthenticationToken(
+                            loginRequest.getUsername(),
+                            loginRequest.getPassword()
+                    )
+            );
 
-            // 优先使用 Cookie 自动登录
-            if (rememberMeCookie != null && !rememberMeCookie.isEmpty()) {
-                user = authService.loginWithToken(rememberMeCookie);
-                // 安全增强：令牌轮换（Token Rotation）
-                // 删除旧令牌，创建一个新令牌
-                tokenService.deleteToken(rememberMeCookie);
-                RememberMeToken newRememberMeToken = tokenService.createToken(user);
-                newTokenValue = newRememberMeToken.getTokenValue();
-            }
-            // 如果没有 Cookie，则使用用户名密码登录
-            else if (loginRequest != null) {
-                user = authService.login(loginRequest.getUsername(), loginRequest.getPassword());
-                // 如果用户选择了 "记住我"，则创建令牌
-                if (loginRequest.isRememberMe()) {
-                    RememberMeToken rememberMeToken = tokenService.createToken(user);
-                    newTokenValue = rememberMeToken.getTokenValue();
-                }
-            }
-            else {
-                return ResponseEntity.badRequest().body("请输入登录信息或提供有效的自动登录凭证");
-            }
+            SecurityContextHolder.getContext().setAuthentication(authentication);
 
-            // --- 登录成功后的操作 ---
+            // 生成 Access Token
+            String accessToken = tokenProvider.generateAccessToken(authentication);
+            // 生成 Refresh Token
+            String refreshToken = tokenProvider.generateRefreshToken(authentication); // 新增方法
 
-            // 构建响应体
-            LoginResponse response = new LoginResponse();
-            response.setMessage("登录成功");
-            response.setUserInfo(LoginResponse.UserInfo.fromUser(user));
-
-            ResponseEntity.BodyBuilder responseBuilder = ResponseEntity.ok();
-
-            // 如果生成了新令牌，就设置到 Cookie 中
-            if (newTokenValue != null) {
-                ResponseCookie cookie = ResponseCookie.from("remember-me", newTokenValue)
-                        .httpOnly(true)
-                        .secure(true)
-                        .path("/")
-                        .maxAge(Duration.ofDays(7))
-                        .sameSite("Strict")
-                        .build();
-                responseBuilder.header(HttpHeaders.SET_COOKIE, cookie.toString());
-            }
-
-            return responseBuilder.body(response);
-
-        } catch (IllegalArgumentException | IllegalStateException e) {
-            // 如果登录失败，确保清除了可能无效的 "remember-me" cookie
-            ResponseCookie deleteCookie = ResponseCookie.from("remember-me", "")
-                    .path("/")
-                    .maxAge(0) // 让 cookie 立即过期
+            // (核心修改) 将 Refresh Token Cookie 的路径设置为根路径 "/"
+            ResponseCookie refreshCookie = ResponseCookie.from("refreshToken", refreshToken)
+                    .httpOnly(true)
+                    .secure(true)
+                    .path("/") // <--- 修改为根路径
+                    .maxAge(Duration.ofDays(7))
+                    .sameSite("Strict")
                     .build();
-            return ResponseEntity.status(401)
-                    .header(HttpHeaders.SET_COOKIE, deleteCookie.toString())
-                    .body(e.getMessage());
+            response.addHeader(HttpHeaders.SET_COOKIE, refreshCookie.toString());
+
+            // 获取用户详情并构建 UserResponse
+            UserDetails userDetails = (UserDetails) authentication.getPrincipal();
+            User user = userRepository.findByUsername(userDetails.getUsername()).orElseThrow(() -> new RuntimeException("User not found"));
+            LoginResponse.UserInfo userInfo =
+          new LoginResponse.UserInfo(
+              user.getId(), user.getUsername(), user.getNickname(), user.getAvatarUrl());
+
+            return ResponseEntity.ok(new JwtAuthenticationResponse(accessToken, userInfo));
+
         } catch (Exception e) {
-            return ResponseEntity.internalServerError().body("登录时发生未知错误: " + e.getMessage());
+            return ResponseEntity.status(401).body("登录失败: " + e.getMessage());
         }
     }
 
-    @PostMapping("/logout")
-    public ResponseEntity<?> logout(
-            @CookieValue(name = "remember-me", required = false) String rememberMeCookie
-    ) {
-        // 如果存在 "记住我" 的 cookie，就从数据库中删除对应的 token
-        if (rememberMeCookie != null) {
-            tokenService.deleteToken(rememberMeCookie);
+    @PostMapping("/refresh")
+    public ResponseEntity<?> refreshToken(HttpServletRequest request, HttpServletResponse response) {
+        // 从 Cookie 中获取 Refresh Token
+        String refreshToken = null;
+        if (request.getCookies() != null) {
+            for (jakarta.servlet.http.Cookie cookie : request.getCookies()) {
+                if ("refreshToken".equals(cookie.getName())) {
+                    refreshToken = cookie.getValue();
+                    break;
+                }
+            }
         }
 
-        // 创建一个让浏览器端 "remember-me" cookie 失效的响应
-        ResponseCookie deleteCookie = ResponseCookie.from("remember-me", "")
+        if (refreshToken == null || !tokenProvider.validateRefreshToken(refreshToken)) { // 新增验证 Refresh Token 方法
+            return ResponseEntity.status(401).body("Invalid Refresh Token");
+        }
+
+        String username = tokenProvider.getUsernameFromRefreshToken(refreshToken); // 新增从 Refresh Token 获取用户名方法
+        Optional<User> userOptional = userRepository.findByUsername(username);
+
+        if (userOptional.isEmpty() || !userOptional.get().isEnabled() || !userOptional.get().isAccountNonLocked()) {
+            return ResponseEntity.status(401).body("User associated with Refresh Token is invalid or disabled.");
+        }
+
+        // 重新生成 Access Token
+        // 注意：这里我们不通过 AuthenticationManager，因为 Refresh Token 已经验证了用户身份
+        // 我们直接根据 Refresh Token 中的用户信息生成新的 Access Token
+        User user = userOptional.get();
+        // 创建一个临时的 Authentication 对象来生成新的 Access Token
+        UsernamePasswordAuthenticationToken authentication = new UsernamePasswordAuthenticationToken(
+                user, null, user.getAuthorities());
+
+        String newAccessToken = tokenProvider.generateAccessToken(authentication);
+
+        // (可选) 令牌轮换：生成新的 Refresh Token 并替换旧的 Cookie
+        String newRefreshToken = tokenProvider.generateRefreshToken(authentication);
+        ResponseCookie newRefreshCookie = ResponseCookie.from("refreshToken", newRefreshToken)
                 .httpOnly(true)
                 .secure(true)
-                .path("/")
+                .path("/api/auth/refresh")
+                .maxAge(Duration.ofDays(7))
+                .sameSite("Strict")
+                .build();
+        response.addHeader(HttpHeaders.SET_COOKIE, newRefreshCookie.toString());
+
+        LoginResponse.UserInfo userInfo =
+                new LoginResponse.UserInfo(
+                        user.getId(), user.getUsername(), user.getNickname(), user.getAvatarUrl());
+
+        return ResponseEntity.ok(new JwtAuthenticationResponse(newAccessToken, userInfo));
+    }
+
+
+    @PostMapping("/logout")
+    public ResponseEntity<?> logout(HttpServletResponse response) {
+        // 清除 Refresh Token Cookie
+        ResponseCookie deleteCookie = ResponseCookie.from("refreshToken", "")
+                .httpOnly(true)
+                .secure(true)
+                .path("/") // 路径要与设置时一致
                 .maxAge(0) // 立即过期
                 .sameSite("Strict")
                 .build();
+        response.addHeader(HttpHeaders.SET_COOKIE, deleteCookie.toString());
 
-        return ResponseEntity.ok()
-                .header(HttpHeaders.SET_COOKIE, deleteCookie.toString())
-                .body("已成功登出");
+        SecurityContextHolder.clearContext();
+        return ResponseEntity.ok("已成功登出");
     }
 }

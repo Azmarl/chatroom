@@ -12,4 +12,6 @@ public interface UserBlockRepository extends JpaRepository<UserBlock, UserBlockI
     // New method to get IDs of users blocked by a specific user
     @Query("SELECT ub.blocked.id FROM UserBlock ub WHERE ub.blocker.id = :blockerId")
     List<Long> findBlockedIdsByBlockerId(Long blockerId);
+
+    boolean existsByBlockerIdAndBlockedId(Long friendId, Long id);
 }

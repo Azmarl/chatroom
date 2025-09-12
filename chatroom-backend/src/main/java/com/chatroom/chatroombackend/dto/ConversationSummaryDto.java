@@ -8,6 +8,7 @@ import java.time.LocalDateTime;
 @Data
 public class ConversationSummaryDto {
     private Long conversationId;
+    private String uuid;
     private ConversationType type;
     private String name; // 私聊时是对方昵称，群聊时是群名称
     private String avatarUrl; // 对方头像或群头像
@@ -18,4 +19,6 @@ public class ConversationSummaryDto {
 
     // 当前用户的未读消息数
     private int unreadCount;
+    private boolean Pinned;
+    private boolean NotificationsMuted;
 }
