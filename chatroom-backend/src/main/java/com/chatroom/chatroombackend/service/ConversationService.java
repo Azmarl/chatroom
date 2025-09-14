@@ -942,8 +942,37 @@ public class ConversationService {
         .findTopByConversationOrderByCreatedAtDesc(convo)
         .ifPresent(
             msg -> {
-              dto.setLastMessageContent(msg.getContent());
               dto.setLastMessageTimestamp(msg.getCreatedAt());
+
+              // 根据消息类型设置不同的显示内容
+              switch (msg.getMessageType()) {
+                case file:
+                  try {
+                    // 尝试解析文件内容的JSON
+                    // 注意: 你需要一个JSON解析库，如 Jackson 或 Gson
+                    // 这里以 Jackson 为例
+                    com.fasterxml.jackson.databind.ObjectMapper mapper =
+                        new com.fasterxml.jackson.databind.ObjectMapper();
+                    com.fasterxml.jackson.databind.JsonNode rootNode =
+                        mapper.readTree(msg.getContent());
+                    String fileName = rootNode.has("name") ? rootNode.get("name").asText() : "文件";
+
+                    if (isImageFile(fileName)) {
+                      dto.setLastMessageContent("[图片]");
+                    } else {
+                      dto.setLastMessageContent("[文件] " + fileName);
+                    }
+                  } catch (Exception e) {
+                    // 解析失败，提供一个默认值
+                    dto.setLastMessageContent("[文件]");
+                  }
+                  break;
+                case emoji: // 如果未来有特殊处理，可以在这里添加
+                case text:
+                default:
+                  dto.setLastMessageContent(msg.getContent());
+                  break;
+              }
             });
 
     // Set name and avatar (logic differs for GROUP vs PRIVATE)
@@ -1158,5 +1187,18 @@ public class ConversationService {
               })
           .orElse(ConversationStatus.CONVERSATION_NOT_FOUND);
     }
+  }
+
+  private boolean isImageFile(String fileName) {
+    if (fileName == null || fileName.isEmpty()) {
+      return false;
+    }
+    String lowerCaseName = fileName.toLowerCase();
+    return lowerCaseName.endsWith(".jpg")
+        || lowerCaseName.endsWith(".jpeg")
+        || lowerCaseName.endsWith(".png")
+        || lowerCaseName.endsWith(".gif")
+        || lowerCaseName.endsWith(".bmp")
+        || lowerCaseName.endsWith(".webp");
   }
 }

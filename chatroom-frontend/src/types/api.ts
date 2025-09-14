@@ -84,9 +84,12 @@ export interface MessageDto {
   content: string;
   timestamp: string; // 后端 LocalDateTime 会被序列化为 ISO 字符串
   sender: Sender;
+  messageType: 'text' | 'image' | 'file' | 'emoji' | 'system'; 
   repliedMessage?: RepliedMessageInfo; // 可选字段，现在是一个对象
   recalled?: boolean; // (核心修改) 字段名与后端保持一致
 }
+
+export type MessageType = 'text' | 'image' | 'file' | 'emoji' | 'system';
 
 export interface GroupJoinRequestDto {
   requesterId: number;

@@ -2,6 +2,7 @@ package com.chatroom.chatroombackend.dto;
 
 import com.chatroom.chatroombackend.entity.Message;
 import com.chatroom.chatroombackend.entity.User;
+import com.chatroom.chatroombackend.enums.MessageType;
 import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.NoArgsConstructor;
@@ -21,7 +22,7 @@ public class MessageDto {
     private String content;
     private LocalDateTime timestamp;
     private SenderDto sender;
-
+    private MessageType messageType;
     // (核心修改) 将 Long 类型改为一个包含更多信息的对象
     private RepliedMessageInfo repliedMessage;
     private boolean isRecalled;
@@ -49,6 +50,7 @@ public class MessageDto {
                 content, // 使用处理过的内容
                 message.getCreatedAt(),
                 SenderDto.fromUser(message.getSender()),
+                message.getMessageType(),
                 repliedInfo,
                 message.isRecalled()
         );

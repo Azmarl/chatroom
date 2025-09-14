@@ -1,6 +1,8 @@
 import { defineStore } from 'pinia';
 import type { ConversationSummary } from '@/types/api';
 import apiClient from '@/api/apiClient';
+import { parseFileContent, isImageFile } from '@/utils/fileUtils'; 
+import type { MessageDto } from '@/types/api';
 
 export const useChatStore = defineStore('chat', {
   // 1. State: 存储所有会话列表
@@ -42,14 +44,35 @@ export const useChatStore = defineStore('chat', {
         this.sortConversations();
     },
 
-    /**
-     * 当收到新消息时，更新指定会话的最后一条消息和时间戳。
-     */
-    updateConversationSummary(conversationId: number, content: string, timestamp: string) {
-      const index = this.conversations.findIndex(c => c.conversationId === conversationId);
+    updateConversationSummary(message: MessageDto) {
+      const index = this.conversations.findIndex(c => c.conversationId === message.conversationId);
       if (index !== -1) {
-        this.conversations[index].lastMessageContent = content;
-        this.conversations[index].lastMessageTimestamp = timestamp;
+        const convo = this.conversations[index];
+        convo.lastMessageTimestamp = message.timestamp;
+
+        // 根据消息类型格式化摘要内容
+        switch (message.messageType) {
+          case 'file':
+            try {
+              const fileInfo = parseFileContent(message.content);
+              if (isImageFile(fileInfo.name)) {
+                convo.lastMessageContent = '[图片]';
+              } else {
+                convo.lastMessageContent = `[文件] ${fileInfo.name}`;
+              }
+            } catch (e) {
+              convo.lastMessageContent = '[文件]';
+            }
+            break;
+          
+          // emoji和text现在统一处理
+          case 'text':
+          case 'emoji':
+          default:
+            convo.lastMessageContent = message.content;
+            break;
+        }
+        
         this.sortConversations();
       }
     },
